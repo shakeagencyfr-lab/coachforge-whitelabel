@@ -16,26 +16,6 @@ async function supabaseRequest(path, method = 'GET', body = null) {
   return res.json();
 }
 
-function safeParseJSON(text) {
-  // Extraire entre { et }
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON found');
-  let raw = text.slice(start, end + 1);
-  // Supprimer les commentaires // et /* */
-  raw = raw.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-  // Remplacer les apostrophes typographiques et guillemets courbes
-  raw = raw.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
-  // Tenter le parse direct
-  try { return JSON.parse(raw); } catch(e) {}
-  // Nettoyer les trailing commas
-  raw = raw.replace(/,(\s*[}\]])/g, '$1');
-  try { return JSON.parse(raw); } catch(e) {}
-  // Remplacer les apostrophes dans les valeurs string par espace
-  raw = raw.replace(/"([^"]*)"/g, (match) => match.replace(/'/g, ' '));
-  return JSON.parse(raw);
-}
-
 async function callClaude(prompt) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -46,15 +26,19 @@ async function callClaude(prompt) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
   const text = data.content?.[0]?.text || '';
-  const tokens = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
-  return { json: safeParseJSON(text), tokens };
+  // Enlever les backticks markdown si présents
+  const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('No JSON: ' + cleaned.slice(0, 200));
+  return { json: JSON.parse(cleaned.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
 }
 
 module.exports = async (req, res) => {
@@ -86,10 +70,10 @@ module.exports = async (req, res) => {
 
     if (type === 'training' || type === 'combined') {
       const { json, tokens } = await callClaude(
-        `Reponds avec UNIQUEMENT du JSON valide. Pas de texte. Pas de markdown. Pas d apostrophes dans les valeurs.
+        `Reponds avec UNIQUEMENT du JSON valide. Pas de markdown. Pas de backticks. Juste le JSON brut.
 Profil: niveau ${client.fitness_level || 'debutant'}, objectif ${client.goal || 'forme'}, ${client.available_days || 3} jours semaine, ${client.equipment || 'salle'}.
-Retourne exactement ce JSON avec des vraies valeurs:
-{"program_title":"Programme 4 semaines","duration_weeks":4,"sessions":[{"day":"Lundi","focus":"Haut corps","exercises":[{"name":"Developpe couche","sets":3,"reps":"10","rest_seconds":90},{"name":"Rowing haltere","sets":3,"reps":"10","rest_seconds":90},{"name":"Curl biceps","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Mercredi","focus":"Bas corps","exercises":[{"name":"Squat","sets":3,"reps":"12","rest_seconds":90},{"name":"Fente avant","sets":3,"reps":"10","rest_seconds":90},{"name":"Leg curl","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Vendredi","focus":"Full body","exercises":[{"name":"Souleve de terre","sets":3,"reps":"8","rest_seconds":120},{"name":"Tractions assistees","sets":3,"reps":"8","rest_seconds":90},{"name":"Gainage","sets":3,"reps":"30sec","rest_seconds":60}]}],"tips":["Echauffement 10 minutes obligatoire","Boire de l eau regulierement"]}`
+Retourne exactement ce JSON avec des vraies valeurs adaptees au profil:
+{"program_title":"Programme 4 semaines","duration_weeks":4,"sessions":[{"day":"Lundi","focus":"Haut corps","exercises":[{"name":"Developpe couche","sets":3,"reps":"10","rest_seconds":90},{"name":"Rowing haltere","sets":3,"reps":"10","rest_seconds":90},{"name":"Curl biceps","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Mercredi","focus":"Bas corps","exercises":[{"name":"Squat","sets":3,"reps":"12","rest_seconds":90},{"name":"Fente avant","sets":3,"reps":"10","rest_seconds":90},{"name":"Leg curl","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Vendredi","focus":"Full body","exercises":[{"name":"Souleve de terre","sets":3,"reps":"8","rest_seconds":120},{"name":"Tractions assistees","sets":3,"reps":"8","rest_seconds":90},{"name":"Gainage","sets":3,"reps":"30sec","rest_seconds":60}]}],"tips":["Echauffement 10 minutes","Boire de l eau pendant la seance"]}`
       );
       content_json.training = json;
       totalTokens += tokens;
@@ -97,9 +81,9 @@ Retourne exactement ce JSON avec des vraies valeurs:
 
     if (type === 'nutrition' || type === 'combined') {
       const { json, tokens } = await callClaude(
-        `Reponds avec UNIQUEMENT du JSON valide. Pas de texte. Pas de markdown. Pas d apostrophes dans les valeurs.
+        `Reponds avec UNIQUEMENT du JSON valide. Pas de markdown. Pas de backticks. Juste le JSON brut.
 Profil: objectif ${client.goal || 'forme'}, poids ${client.weight_kg || 75}kg, regime ${client.dietary_preferences || 'omnivore'}.
-Retourne exactement ce JSON avec des vraies valeurs:
+Retourne exactement ce JSON avec des vraies valeurs adaptees au profil:
 {"plan_title":"Plan nutrition personnalise","daily_calories":2000,"macros":{"protein_g":150,"carbs_g":220,"fat_g":65},"meals":[{"name":"Petit dejeuner","time":"7h00","calories":450,"foods":[{"item":"Flocons avoine","quantity":"80g","calories":300},{"item":"Banane","quantity":"1 piece","calories":90}]},{"name":"Dejeuner","time":"12h30","calories":650,"foods":[{"item":"Poulet grille","quantity":"150g","calories":250},{"item":"Riz complet","quantity":"120g","calories":160}]},{"name":"Diner","time":"19h30","calories":550,"foods":[{"item":"Saumon","quantity":"130g","calories":270},{"item":"Brocolis","quantity":"150g","calories":50}]}],"tips":["Boire 2 litres par jour","Manger lentement"]}`
       );
       content_json.nutrition = json;
