@@ -26,13 +26,17 @@ async function callClaude(prompt) {
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4000,
+      max_tokens: 6000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
   const data = await res.json();
   const text = data.content?.[0]?.text || '';
-  const clean = text.replace(/```json|```/g, '').trim();
+  // Extraire proprement le JSON entre { et }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('No JSON in response');
+  const clean = text.slice(start, end + 1);
   return { json: JSON.parse(clean), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
 }
 
@@ -67,21 +71,29 @@ module.exports = async (req, res) => {
     let totalTokens = 0;
 
     if (type === 'training' || type === 'combined') {
-      const prompt = `Tu es coach sportif expert. Génère un programme d'entraînement 12 semaines en JSON strict pour :
-- Nom: ${client.full_name}, Niveau: ${client.fitness_level}, Objectif: ${client.goal}
-- ${client.available_days} jours/semaine, ${client.session_duration_min} min/séance
-- Équipement: ${client.equipment}, Blessures: ${client.injuries || 'Aucune'}
-Réponds UNIQUEMENT en JSON: {"program_title":"","duration_weeks":12,"phases":[{"phase":1,"name":"","weeks":"1-4","goal":"","sessions":[{"day":"","focus":"","exercises":[{"name":"","sets":0,"reps":"","rpe":0,"rest_seconds":0}]}]}],"general_tips":[]}`;
+      const prompt = `Tu es coach sportif expert. Genere un programme entrainement 12 semaines en JSON valide uniquement pour:
+Nom: ${client.full_name}, Niveau: ${client.fitness_level || 'intermediaire'}, Objectif: ${client.goal || 'remise en forme'}
+${client.available_days || 3} jours par semaine, ${client.session_duration_min || 60} min par seance
+Equipement: ${client.equipment || 'salle de sport'}, Blessures: ${client.injuries || 'aucune'}
+
+Reponds UNIQUEMENT avec ce JSON sans aucun texte avant ou apres:
+{"program_title":"Programme 12 semaines","duration_weeks":12,"phases":[{"phase":1,"name":"Adaptation","weeks":"1-4","goal":"Adaptation musculaire","sessions":[{"day":"Lundi","focus":"Haut du corps","exercises":[{"name":"Developpe couche","sets":3,"reps":"10-12","rpe":7,"rest_seconds":90},{"name":"Tirage vertical","sets":3,"reps":"10-12","rpe":7,"rest_seconds":90}]}]},{"phase":2,"name":"Progression","weeks":"5-8","goal":"Progression des charges","sessions":[{"day":"Lundi","focus":"Haut du corps","exercises":[{"name":"Developpe couche","sets":4,"reps":"8-10","rpe":8,"rest_seconds":120}]}]},{"phase":3,"name":"Intensification","weeks":"9-12","goal":"Intensification maximale","sessions":[{"day":"Lundi","focus":"Full body","exercises":[{"name":"Squat","sets":4,"reps":"6-8","rpe":9,"rest_seconds":150}]}]}],"general_tips":["Bien vous echauffer avant chaque seance","Respectez les temps de repos"]}
+
+Adapte ce JSON au profil du client en gardant exactement cette structure.`;
       const { json, tokens } = await callClaude(prompt);
       content_json.training = json;
       totalTokens += tokens;
     }
 
     if (type === 'nutrition' || type === 'combined') {
-      const prompt = `Tu es nutritionniste expert. Génère un plan nutritionnel en JSON strict pour :
-- Nom: ${client.full_name}, Objectif: ${client.goal}, Poids: ${client.weight_kg}kg
-- Calories: ${client.daily_calories || 'à calculer'}, Préférences: ${client.dietary_preferences || 'Aucune'}
-Réponds UNIQUEMENT en JSON: {"plan_title":"","daily_calories":0,"macros":{"protein_g":0,"carbs_g":0,"fat_g":0},"meals":[{"name":"","time":"","calories":0,"foods":[{"item":"","quantity":"","calories":0}]}],"tips":[]}`;
+      const prompt = `Tu es nutritionniste expert. Genere un plan nutritionnel en JSON valide uniquement pour:
+Nom: ${client.full_name}, Objectif: ${client.goal || 'remise en forme'}, Poids: ${client.weight_kg || 75}kg
+Calories: ${client.daily_calories || 'a calculer'}, Preferences: ${client.dietary_preferences || 'omnivore'}
+
+Reponds UNIQUEMENT avec ce JSON sans aucun texte avant ou apres:
+{"plan_title":"Plan nutritionnel personnalise","daily_calories":2000,"macros":{"protein_g":150,"carbs_g":200,"fat_g":70},"meals":[{"name":"Petit dejeuner","time":"7h00","calories":500,"foods":[{"item":"Flocons avoine","quantity":"80g","calories":300},{"item":"Oeuf","quantity":"2 unites","calories":140}]},{"name":"Dejeuner","time":"12h30","calories":700,"foods":[{"item":"Poulet grille","quantity":"150g","calories":250},{"item":"Riz complet","quantity":"150g","calories":200}]},{"name":"Diner","time":"19h30","calories":600,"foods":[{"item":"Saumon","quantity":"150g","calories":280},{"item":"Legumes vapeur","quantity":"200g","calories":80}]}],"hydration_liters":2.5,"supplements":["Proteines whey si besoin"],"tips":["Mangez lentement","Hydratez vous regulierement"]}
+
+Adapte ce JSON au profil du client en gardant exactement cette structure.`;
       const { json, tokens } = await callClaude(prompt);
       content_json.nutrition = json;
       totalTokens += tokens;
