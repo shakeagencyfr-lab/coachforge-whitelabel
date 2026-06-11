@@ -851,6 +851,7 @@ async function handleLogin() {
     if (data.error) throw new Error(data.error_description || data.error);
     state.session = data;
     state.user = data.user;
+    localStorage.setItem('cf_session', JSON.stringify(data));
     await loadUserData();
     showApp();
   } catch (err) {
@@ -902,6 +903,7 @@ async function handleRegister() {
       role: 'owner',
     }, state.session.access_token);
 
+    localStorage.setItem('cf_session', JSON.stringify(state.session));
     await loadUserData();
     showApp();
     showToast('Compte créé avec succès !', 'success');
