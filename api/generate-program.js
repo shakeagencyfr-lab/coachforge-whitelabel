@@ -32,13 +32,11 @@ async function callClaude(prompt) {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
-  const text = data.content?.[0]?.text || '';
-  // Enlever les backticks markdown si présents
-  const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON: ' + cleaned.slice(0, 200));
-  return { json: JSON.parse(cleaned.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
+  const text = (data.content?.[0]?.text || '').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('No JSON: ' + text.slice(0, 200));
+  return { json: JSON.parse(text.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
 }
 
 module.exports = async (req, res) => {
@@ -49,7 +47,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { client_id, workspace_id, type = 'combined', language = 'fr' } = req.body;
+    const { client_id, workspace_id, type = 'training', language = 'fr' } = req.body;
     if (!client_id || !workspace_id) return res.status(400).json({ error: 'client_id and workspace_id required' });
 
     const clients = await supabaseRequest(`/clients?id=eq.${client_id}&workspace_id=eq.${workspace_id}`);
@@ -68,25 +66,25 @@ module.exports = async (req, res) => {
     let content_json = {};
     let totalTokens = 0;
 
-    if (type === 'training' || type === 'combined') {
-      const { json, tokens } = await callClaude(
-        `Reponds avec UNIQUEMENT du JSON valide. Pas de markdown. Pas de backticks. Juste le JSON brut.
-Profil: niveau ${client.fitness_level || 'debutant'}, objectif ${client.goal || 'forme'}, ${client.available_days || 3} jours semaine, ${client.equipment || 'salle'}.
-Retourne exactement ce JSON avec des vraies valeurs adaptees au profil:
-{"program_title":"Programme 4 semaines","duration_weeks":4,"sessions":[{"day":"Lundi","focus":"Haut corps","exercises":[{"name":"Developpe couche","sets":3,"reps":"10","rest_seconds":90},{"name":"Rowing haltere","sets":3,"reps":"10","rest_seconds":90},{"name":"Curl biceps","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Mercredi","focus":"Bas corps","exercises":[{"name":"Squat","sets":3,"reps":"12","rest_seconds":90},{"name":"Fente avant","sets":3,"reps":"10","rest_seconds":90},{"name":"Leg curl","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Vendredi","focus":"Full body","exercises":[{"name":"Souleve de terre","sets":3,"reps":"8","rest_seconds":120},{"name":"Tractions assistees","sets":3,"reps":"8","rest_seconds":90},{"name":"Gainage","sets":3,"reps":"30sec","rest_seconds":60}]}],"tips":["Echauffement 10 minutes","Boire de l eau pendant la seance"]}`
-      );
-      content_json.training = json;
-      totalTokens += tokens;
-    }
-
-    if (type === 'nutrition' || type === 'combined') {
+    // UN SEUL appel Claude par requête pour éviter le timeout
+    if (type === 'nutrition') {
       const { json, tokens } = await callClaude(
         `Reponds avec UNIQUEMENT du JSON valide. Pas de markdown. Pas de backticks. Juste le JSON brut.
 Profil: objectif ${client.goal || 'forme'}, poids ${client.weight_kg || 75}kg, regime ${client.dietary_preferences || 'omnivore'}.
-Retourne exactement ce JSON avec des vraies valeurs adaptees au profil:
+Retourne ce JSON adapte au profil:
 {"plan_title":"Plan nutrition personnalise","daily_calories":2000,"macros":{"protein_g":150,"carbs_g":220,"fat_g":65},"meals":[{"name":"Petit dejeuner","time":"7h00","calories":450,"foods":[{"item":"Flocons avoine","quantity":"80g","calories":300},{"item":"Banane","quantity":"1 piece","calories":90}]},{"name":"Dejeuner","time":"12h30","calories":650,"foods":[{"item":"Poulet grille","quantity":"150g","calories":250},{"item":"Riz complet","quantity":"120g","calories":160}]},{"name":"Diner","time":"19h30","calories":550,"foods":[{"item":"Saumon","quantity":"130g","calories":270},{"item":"Brocolis","quantity":"150g","calories":50}]}],"tips":["Boire 2 litres par jour","Manger lentement"]}`
       );
       content_json.nutrition = json;
+      totalTokens += tokens;
+    } else {
+      // training ou combined = on génère training d'abord
+      const { json, tokens } = await callClaude(
+        `Reponds avec UNIQUEMENT du JSON valide. Pas de markdown. Pas de backticks. Juste le JSON brut.
+Profil: niveau ${client.fitness_level || 'debutant'}, objectif ${client.goal || 'forme'}, ${client.available_days || 3} jours semaine, ${client.equipment || 'salle'}.
+Retourne ce JSON adapte au profil:
+{"program_title":"Programme 4 semaines","duration_weeks":4,"sessions":[{"day":"Lundi","focus":"Haut corps","exercises":[{"name":"Developpe couche","sets":3,"reps":"10","rest_seconds":90},{"name":"Rowing haltere","sets":3,"reps":"10","rest_seconds":90},{"name":"Curl biceps","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Mercredi","focus":"Bas corps","exercises":[{"name":"Squat","sets":3,"reps":"12","rest_seconds":90},{"name":"Fente avant","sets":3,"reps":"10","rest_seconds":90},{"name":"Leg curl","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Vendredi","focus":"Full body","exercises":[{"name":"Souleve de terre","sets":3,"reps":"8","rest_seconds":120},{"name":"Tractions assistees","sets":3,"reps":"8","rest_seconds":90},{"name":"Gainage","sets":3,"reps":"30sec","rest_seconds":60}]}],"tips":["Echauffement 10 minutes","Boire de l eau pendant la seance"]}`
+      );
+      content_json.training = json;
       totalTokens += tokens;
     }
 
