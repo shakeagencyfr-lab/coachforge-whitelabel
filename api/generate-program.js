@@ -26,7 +26,7 @@ async function callClaude(prompt) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 8000,
+      max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -35,16 +35,14 @@ async function callClaude(prompt) {
   const text = data.content?.[0]?.text || '';
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON found: ' + text.slice(0, 200));
-  const clean = text.slice(start, end + 1);
-  return { json: JSON.parse(clean), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
+  if (start === -1 || end === -1) throw new Error('No JSON: ' + text.slice(0, 300));
+  return { json: JSON.parse(text.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -58,9 +56,7 @@ module.exports = async (req, res) => {
 
     const workspaces = await supabaseRequest(`/workspaces?id=eq.${workspace_id}`);
     const workspace = workspaces[0];
-    if (workspace.generations_used >= workspace.generation_quota) {
-      return res.status(402).json({ error: 'quota_exceeded' });
-    }
+    if (workspace.generations_used >= workspace.generation_quota) return res.status(402).json({ error: 'quota_exceeded' });
 
     const programs = await supabaseRequest('/programs', 'POST', {
       workspace_id, client_id, type, language, status: 'generating'
@@ -71,40 +67,19 @@ module.exports = async (req, res) => {
     let totalTokens = 0;
 
     if (type === 'training' || type === 'combined') {
-      const prompt = `Tu es coach sportif expert. Genere un programme entrainement personnalise en JSON valide pour ce client:
-- Nom: ${client.full_name}
-- Niveau: ${client.fitness_level || 'intermediaire'}
-- Objectif: ${client.goal || 'remise en forme'}
-- Jours par semaine: ${client.available_days || 3}
-- Duree seance: ${client.session_duration_min || 60} min
-- Equipement: ${client.equipment || 'salle de sport'}
-- Blessures: ${client.injuries || 'aucune'}
-
-IMPORTANT: Reponds UNIQUEMENT avec du JSON valide. Pas de texte avant ou apres. Pas de markdown.
-Structure exacte a respecter (3 phases de 4 semaines, ${client.available_days || 3} seances par phase):
-
-{"program_title":"...","duration_weeks":12,"phases":[{"phase":1,"name":"...","weeks":"1-4","goal":"...","sessions":[{"day":"...","focus":"...","exercises":[{"name":"...","sets":3,"reps":"10-12","rpe":7,"rest_seconds":90}]}]}],"general_tips":["..."]}`;
-
-      const { json, tokens } = await callClaude(prompt);
+      const { json, tokens } = await callClaude(`Coach sportif expert. JSON uniquement, pas de texte.
+Client: ${client.full_name}, ${client.fitness_level || 'intermediaire'}, objectif: ${client.goal || 'remise en forme'}, ${client.available_days || 3}j/semaine, ${client.session_duration_min || 60}min, ${client.equipment || 'salle'}, blessures: ${client.injuries || 'aucune'}.
+Genere 3 seances par semaine sur 4 semaines. JSON strict:
+{"program_title":"string","duration_weeks":4,"sessions":[{"week":1,"day":"Lundi","focus":"string","exercises":[{"name":"string","sets":3,"reps":"10","rpe":7,"rest_seconds":90},{"name":"string","sets":3,"reps":"10","rpe":7,"rest_seconds":90},{"name":"string","sets":3,"reps":"10","rpe":7,"rest_seconds":90}]},{"week":1,"day":"Mercredi","focus":"string","exercises":[{"name":"string","sets":3,"reps":"10","rpe":7,"rest_seconds":90}]},{"week":1,"day":"Vendredi","focus":"string","exercises":[{"name":"string","sets":3,"reps":"10","rpe":7,"rest_seconds":90}]}],"tips":["string","string"]}`);
       content_json.training = json;
       totalTokens += tokens;
     }
 
     if (type === 'nutrition' || type === 'combined') {
-      const prompt = `Tu es nutritionniste expert. Genere un plan nutritionnel personnalise en JSON valide pour ce client:
-- Nom: ${client.full_name}
-- Objectif: ${client.goal || 'remise en forme'}
-- Poids: ${client.weight_kg || 75}kg, Taille: ${client.height_cm || 170}cm
-- Calories cibles: ${client.daily_calories || 'a calculer selon le profil'}
-- Preferences: ${client.dietary_preferences || 'omnivore'}
-- Allergies: ${client.allergies || 'aucune'}
-
-IMPORTANT: Reponds UNIQUEMENT avec du JSON valide. Pas de texte avant ou apres. Pas de markdown.
-Structure exacte a respecter (4 repas par jour):
-
-{"plan_title":"...","daily_calories":2000,"macros":{"protein_g":150,"carbs_g":200,"fat_g":70},"meals":[{"name":"Petit dejeuner","time":"7h00","calories":500,"foods":[{"item":"...","quantity":"...","calories":200}]},{"name":"Dejeuner","time":"12h30","calories":700,"foods":[{"item":"...","quantity":"...","calories":300}]},{"name":"Collation","time":"16h00","calories":300,"foods":[{"item":"...","quantity":"...","calories":150}]},{"name":"Diner","time":"19h30","calories":500,"foods":[{"item":"...","quantity":"...","calories":250}]}],"hydration_liters":2.5,"supplements":["..."],"tips":["..."]}`;
-
-      const { json, tokens } = await callClaude(prompt);
+      const { json, tokens } = await callClaude(`Nutritionniste expert. JSON uniquement, pas de texte.
+Client: ${client.full_name}, objectif: ${client.goal || 'remise en forme'}, ${client.weight_kg || 75}kg/${client.height_cm || 170}cm, ${client.dietary_preferences || 'omnivore'}, allergies: ${client.allergies || 'aucune'}.
+JSON strict:
+{"plan_title":"string","daily_calories":2000,"macros":{"protein_g":150,"carbs_g":200,"fat_g":70},"meals":[{"name":"Petit-dejeuner","time":"7h00","calories":500,"foods":[{"item":"string","quantity":"string","calories":200}]},{"name":"Dejeuner","time":"12h30","calories":700,"foods":[{"item":"string","quantity":"string","calories":300}]},{"name":"Diner","time":"19h30","calories":600,"foods":[{"item":"string","quantity":"string","calories":250}]}],"tips":["string","string"]}`);
       content_json.nutrition = json;
       totalTokens += tokens;
     }
@@ -112,8 +87,7 @@ Structure exacte a respecter (4 repas par jour):
     await supabaseRequest(`/programs?id=eq.${program.id}`, 'PATCH', { content_json, status: 'ready' });
     await supabaseRequest(`/workspaces?id=eq.${workspace_id}`, 'PATCH', { generations_used: workspace.generations_used + 1 });
     await supabaseRequest('/generation_logs', 'POST', {
-      workspace_id, program_id: program.id, tokens_used: totalTokens,
-      model: 'claude-sonnet-4-6', status: 'success'
+      workspace_id, program_id: program.id, tokens_used: totalTokens, model: 'claude-sonnet-4-6', status: 'success'
     });
 
     return res.status(200).json({ program_id: program.id, content_json });
