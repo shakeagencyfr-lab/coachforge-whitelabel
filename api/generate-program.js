@@ -13,8 +13,13 @@ async function supabaseRequest(path, method = 'GET', body = null) {
     },
     body: body ? JSON.stringify(body) : null,
   });
-  if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
-  return res.json();
+  const text = await res.text();
+  if (!text) throw new Error(`Supabase ${method} ${path} returned empty response (status ${res.status})`);
+  try {
+    return JSON.parse(text);
+  } catch(e) {
+    throw new Error(`Supabase JSON parse error on ${path}: ${text.slice(0, 200)}`);
+  }
 }
 
 async function callClaude(prompt) {
@@ -36,7 +41,7 @@ async function callClaude(prompt) {
   const text = (data.content?.[0]?.text || '').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON: ' + text.slice(0, 200));
+  if (start === -1 || end === -1) throw new Error('No JSON in Claude response: ' + text.slice(0, 200));
   return { json: JSON.parse(text.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
 }
 
@@ -48,9 +53,8 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    // Vercel parse req.body automatiquement
     const { client_id, workspace_id, type = 'training' } = req.body;
-    if (!client_id || !workspace_id) return res.status(400).json({ error: 'client_id and workspace_id required', received: req.body });
+    if (!client_id || !workspace_id) return res.status(400).json({ error: 'client_id and workspace_id required' });
 
     const clients = await supabaseRequest(`/clients?id=eq.${client_id}&workspace_id=eq.${workspace_id}`);
     const client = clients[0];
@@ -65,9 +69,9 @@ module.exports = async (req, res) => {
       workspace_id, client_id, type, language: 'fr', status: 'generating'
     });
     const program = programs[0];
+    if (!program) throw new Error('Program creation returned empty');
 
     let content_json = {};
-    let totalTokens = 0;
 
     if (type === 'nutrition') {
       const r = await callClaude(
@@ -77,7 +81,6 @@ Retourne ce JSON adapte:
 {"plan_title":"Plan nutrition","daily_calories":2000,"macros":{"protein_g":150,"carbs_g":220,"fat_g":65},"meals":[{"name":"Petit dejeuner","time":"7h00","calories":450,"foods":[{"item":"Flocons avoine","quantity":"80g","calories":300}]},{"name":"Dejeuner","time":"12h30","calories":650,"foods":[{"item":"Poulet","quantity":"150g","calories":250}]},{"name":"Diner","time":"19h30","calories":550,"foods":[{"item":"Saumon","quantity":"130g","calories":270}]}],"tips":["Boire 2L par jour"]}`
       );
       content_json.nutrition = r.json;
-      totalTokens += r.tokens;
     } else {
       const r = await callClaude(
         `Reponds avec UNIQUEMENT du JSON valide. Pas de markdown.
@@ -86,7 +89,6 @@ Retourne ce JSON adapte:
 {"program_title":"Programme 4 semaines","duration_weeks":4,"sessions":[{"day":"Lundi","focus":"Haut","exercises":[{"name":"Developpe couche","sets":3,"reps":"10","rest_seconds":90}]},{"day":"Mercredi","focus":"Bas","exercises":[{"name":"Squat","sets":3,"reps":"12","rest_seconds":90}]},{"day":"Vendredi","focus":"Full","exercises":[{"name":"Souleve de terre","sets":3,"reps":"8","rest_seconds":120}]}],"tips":["Echauffement 10 minutes"]}`
       );
       content_json.training = r.json;
-      totalTokens += r.tokens;
     }
 
     await supabaseRequest(`/programs?id=eq.${program.id}`, 'PATCH', { content_json, status: 'ready' });
