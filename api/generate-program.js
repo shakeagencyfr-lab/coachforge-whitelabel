@@ -2,17 +2,6 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-async function parseBody(req) {
-  return new Promise((resolve) => {
-    let data = '';
-    req.on('data', chunk => data += chunk);
-    req.on('end', () => {
-      try { resolve(JSON.parse(data)); }
-      catch (e) { resolve({}); }
-    });
-  });
-}
-
 async function supabaseRequest(path, method = 'GET', body = null) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
     method,
@@ -59,9 +48,9 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const body = await parseBody(req);
-    const { client_id, workspace_id, type = 'training', language = 'fr' } = body;
-    if (!client_id || !workspace_id) return res.status(400).json({ error: 'client_id and workspace_id required', received: body });
+    // Vercel parse req.body automatiquement
+    const { client_id, workspace_id, type = 'training' } = req.body;
+    if (!client_id || !workspace_id) return res.status(400).json({ error: 'client_id and workspace_id required', received: req.body });
 
     const clients = await supabaseRequest(`/clients?id=eq.${client_id}&workspace_id=eq.${workspace_id}`);
     const client = clients[0];
@@ -73,7 +62,7 @@ module.exports = async (req, res) => {
     if (workspace.generations_used >= workspace.generation_quota) return res.status(402).json({ error: 'quota_exceeded' });
 
     const programs = await supabaseRequest('/programs', 'POST', {
-      workspace_id, client_id, type, language, status: 'generating'
+      workspace_id, client_id, type, language: 'fr', status: 'generating'
     });
     const program = programs[0];
 
