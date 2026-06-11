@@ -25,7 +25,7 @@ async function callClaude(prompt) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5',
       max_tokens: 3000,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -91,7 +91,7 @@ Retourne ce JSON adapte au profil:
     await supabaseRequest(`/programs?id=eq.${program.id}`, 'PATCH', { content_json, status: 'ready' });
     await supabaseRequest(`/workspaces?id=eq.${workspace_id}`, 'PATCH', { generations_used: workspace.generations_used + 1 });
     await supabaseRequest('/generation_logs', 'POST', {
-      workspace_id, program_id: program.id, tokens_used: totalTokens, model: 'claude-sonnet-4-6', status: 'success'
+      workspace_id, program_id: program.id, tokens_used: totalTokens, model: 'claude-haiku-4-5', status: 'success'
     });
 
     return res.status(200).json({ program_id: program.id, content_json });
