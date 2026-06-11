@@ -2,6 +2,17 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
+async function parseBody(req) {
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', chunk => data += chunk);
+    req.on('end', () => {
+      try { resolve(JSON.parse(data)); }
+      catch (e) { resolve({}); }
+    });
+  });
+}
+
 async function supabaseRequest(path, method = 'GET', body = null) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
     method,
@@ -13,10 +24,7 @@ async function supabaseRequest(path, method = 'GET', body = null) {
     },
     body: body ? JSON.stringify(body) : null,
   });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Supabase ${res.status}: ${txt}`);
-  }
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
@@ -40,11 +48,7 @@ async function callClaude(prompt) {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
   if (start === -1 || end === -1) throw new Error('No JSON: ' + text.slice(0, 200));
-  try {
-    return { json: JSON.parse(text.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
-  } catch (e) {
-    throw new Error('JSON parse: ' + e.message + ' | END:' + text.slice(-200));
-  }
+  return { json: JSON.parse(text.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
 }
 
 module.exports = async (req, res) => {
@@ -55,13 +59,9 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    // Vérifier les variables d'env
-    if (!SUPABASE_URL) return res.status(500).json({ error: 'SUPABASE_URL missing' });
-    if (!SUPABASE_SERVICE_KEY) return res.status(500).json({ error: 'SUPABASE_SERVICE_KEY missing' });
-    if (!ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY missing' });
-
-    const { client_id, workspace_id, type = 'training', language = 'fr' } = req.body || {};
-    if (!client_id || !workspace_id) return res.status(400).json({ error: 'client_id and workspace_id required' });
+    const body = await parseBody(req);
+    const { client_id, workspace_id, type = 'training', language = 'fr' } = body;
+    if (!client_id || !workspace_id) return res.status(400).json({ error: 'client_id and workspace_id required', received: body });
 
     const clients = await supabaseRequest(`/clients?id=eq.${client_id}&workspace_id=eq.${workspace_id}`);
     const client = clients[0];
@@ -105,7 +105,6 @@ Retourne ce JSON adapte:
 
     return res.status(200).json({ program_id: program.id, content_json });
   } catch (err) {
-    console.error('ERROR:', err.message, err.stack);
-    return res.status(500).json({ error: err.message, stack: err.stack });
+    return res.status(500).json({ error: err.message });
   }
 };
