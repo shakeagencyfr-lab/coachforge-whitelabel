@@ -25,7 +25,7 @@ async function callClaude(prompt) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -113,7 +113,7 @@ Structure exacte a respecter (4 repas par jour):
     await supabaseRequest(`/workspaces?id=eq.${workspace_id}`, 'PATCH', { generations_used: workspace.generations_used + 1 });
     await supabaseRequest('/generation_logs', 'POST', {
       workspace_id, program_id: program.id, tokens_used: totalTokens,
-      model: 'claude-sonnet-4-20250514', status: 'success'
+      model: 'claude-3-5-sonnet-20241022', status: 'success'
     });
 
     return res.status(200).json({ program_id: program.id, content_json });
