@@ -16,7 +16,7 @@ async function supabaseRequest(path, method = 'GET', body = null) {
   return res.json();
 }
 
-async function callClaude(systemPrompt, userPrompt) {
+async function callClaude(prompt) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -26,19 +26,18 @@ async function callClaude(systemPrompt, userPrompt) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 3000,
-      system: systemPrompt,
-      messages: [
-        { role: 'user', content: userPrompt },
-        { role: 'assistant', content: '{' }
-      ],
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: prompt }],
     }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
-  const text = '{' + (data.content?.[0]?.text || '');
-  const tokens = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
-  return { json: JSON.parse(text), tokens };
+  const text = data.content?.[0]?.text || '';
+  // Extraire JSON
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('No JSON: ' + text.slice(0, 200));
+  return { json: JSON.parse(text.slice(start, end + 1)), tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
 }
 
 module.exports = async (req, res) => {
@@ -69,38 +68,25 @@ module.exports = async (req, res) => {
     let totalTokens = 0;
 
     if (type === 'training' || type === 'combined') {
-      const system = `Tu es coach sportif. Tu reponds UNIQUEMENT en JSON valide, sans texte, sans markdown, sans commentaires. Chaque string JSON ne doit pas contenir de guillemets, apostrophes ou caracteres speciaux.`;
-      const user = `Programme 4 semaines pour: ${client.full_name}, niveau ${client.fitness_level || 'debutant'}, objectif ${client.goal || 'forme'}, ${client.available_days || 3} jours semaine, ${client.equipment || 'salle'}.
-Reponds avec exactement ce format JSON (remplace les valeurs entre <>):
-"program_title": "<titre>",
-"duration_weeks": 4,
-"sessions": [
-{"week": 1, "day": "Lundi", "focus": "<focus>", "exercises": [{"name": "<exercice1>", "sets": 3, "reps": "10-12", "rest_seconds": 90}, {"name": "<exercice2>", "sets": 3, "reps": "10-12", "rest_seconds": 90}, {"name": "<exercice3>", "sets": 3, "reps": "10-12", "rest_seconds": 90}]},
-{"week": 1, "day": "Mercredi", "focus": "<focus>", "exercises": [{"name": "<exercice1>", "sets": 3, "reps": "10-12", "rest_seconds": 90}, {"name": "<exercice2>", "sets": 3, "reps": "10-12", "rest_seconds": 90}]},
-{"week": 1, "day": "Vendredi", "focus": "<focus>", "exercises": [{"name": "<exercice1>", "sets": 3, "reps": "10-12", "rest_seconds": 90}, {"name": "<exercice2>", "sets": 3, "reps": "10-12", "rest_seconds": 90}]}
-],
-"tips": ["<conseil1>", "<conseil2>"]
-}`;
-      const { json, tokens } = await callClaude(system, user);
+      const { json, tokens } = await callClaude(
+        `Reponds avec UNIQUEMENT un objet JSON valide, rien d autre, pas de markdown, pas d explication.
+Genere un programme fitness pour: niveau ${client.fitness_level || 'debutant'}, objectif ${client.goal || 'forme generale'}, ${client.available_days || 3} jours par semaine, equipement: ${client.equipment || 'salle de sport'}.
+JSON requis:
+{"program_title":"Programme Fitness 4 semaines","duration_weeks":4,"sessions":[{"day":"Lundi","focus":"Haut du corps","exercises":[{"name":"Developpe couche","sets":3,"reps":"10","rest_seconds":90},{"name":"Rowing haltere","sets":3,"reps":"10","rest_seconds":90},{"name":"Elevation laterale","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Mercredi","focus":"Bas du corps","exercises":[{"name":"Squat","sets":3,"reps":"12","rest_seconds":90},{"name":"Fente","sets":3,"reps":"10","rest_seconds":90},{"name":"Leg curl","sets":3,"reps":"12","rest_seconds":60}]},{"day":"Vendredi","focus":"Full body","exercises":[{"name":"Soulevé de terre","sets":3,"reps":"8","rest_seconds":120},{"name":"Tractions","sets":3,"reps":"8","rest_seconds":90},{"name":"Gainage","sets":3,"reps":"30sec","rest_seconds":60}]}],"tips":["Echauffez vous 10 minutes","Hydratez vous pendant la seance"]}
+Adapte les exercices au profil mais garde exactement cette structure JSON.`
+      );
       content_json.training = json;
       totalTokens += tokens;
     }
 
     if (type === 'nutrition' || type === 'combined') {
-      const system = `Tu es nutritionniste. Tu reponds UNIQUEMENT en JSON valide, sans texte, sans markdown, sans commentaires. Chaque string JSON ne doit pas contenir de guillemets, apostrophes ou caracteres speciaux.`;
-      const user = `Plan nutrition pour: ${client.full_name}, objectif ${client.goal || 'forme'}, ${client.weight_kg || 75}kg, ${client.dietary_preferences || 'omnivore'}.
-Reponds avec exactement ce format JSON (remplace les valeurs entre <>):
-"plan_title": "<titre>",
-"daily_calories": <nombre>,
-"macros": {"protein_g": <nombre>, "carbs_g": <nombre>, "fat_g": <nombre>},
-"meals": [
-{"name": "Petit-dejeuner", "time": "7h00", "calories": <nombre>, "foods": [{"item": "<aliment>", "quantity": "<quantite>", "calories": <nombre>}, {"item": "<aliment>", "quantity": "<quantite>", "calories": <nombre>}]},
-{"name": "Dejeuner", "time": "12h30", "calories": <nombre>, "foods": [{"item": "<aliment>", "quantity": "<quantite>", "calories": <nombre>}, {"item": "<aliment>", "quantity": "<quantite>", "calories": <nombre>}]},
-{"name": "Diner", "time": "19h30", "calories": <nombre>, "foods": [{"item": "<aliment>", "quantity": "<quantite>", "calories": <nombre>}, {"item": "<aliment>", "quantity": "<quantite>", "calories": <nombre>}]}
-],
-"tips": ["<conseil1>", "<conseil2>"]
-}`;
-      const { json, tokens } = await callClaude(system, user);
+      const { json, tokens } = await callClaude(
+        `Reponds avec UNIQUEMENT un objet JSON valide, rien d autre, pas de markdown, pas d explication.
+Genere un plan nutrition pour: objectif ${client.goal || 'forme generale'}, poids ${client.weight_kg || 75}kg, regime ${client.dietary_preferences || 'omnivore'}.
+JSON requis:
+{"plan_title":"Plan Nutrition Personnalise","daily_calories":2000,"macros":{"protein_g":150,"carbs_g":220,"fat_g":65},"meals":[{"name":"Petit-dejeuner","time":"7h00","calories":450,"foods":[{"item":"Flocons avoine","quantity":"80g","calories":300},{"item":"Banane","quantity":"1 piece","calories":90},{"item":"Oeuf dur","quantity":"1 piece","calories":80}]},{"name":"Dejeuner","time":"12h30","calories":650,"foods":[{"item":"Poulet grille","quantity":"150g","calories":250},{"item":"Riz complet","quantity":"120g","calories":160},{"item":"Legumes vapeur","quantity":"150g","calories":60}]},{"name":"Diner","time":"19h30","calories":550,"foods":[{"item":"Saumon","quantity":"130g","calories":270},{"item":"Patate douce","quantity":"150g","calories":130},{"item":"Salade verte","quantity":"100g","calories":20}]}],"tips":["Boire 2L d eau par jour","Manger lentement"]}
+Adapte les calories et aliments au profil mais garde exactement cette structure JSON.`
+      );
       content_json.nutrition = json;
       totalTokens += tokens;
     }
