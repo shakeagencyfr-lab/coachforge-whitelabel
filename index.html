@@ -880,13 +880,17 @@ async function handleRegister() {
   try {
     const data = await sbAuth('/signup', { email, password });
     if (data.error) throw new Error(data.error_description || data.error);
-    state.session = data;
-    state.user = data.user;
 
-    // Créer workspace
+    // Connexion immédiate pour avoir un token valide
+    const loginData = await sbAuth('/token?grant_type=password', { email, password });
+    if (loginData.error) throw new Error(loginData.error_description || loginData.error);
+    state.session = loginData;
+    state.user = loginData.user;
+
+    // Créer workspace avec le token de session actif
     const [ws] = await sbFetch('/workspaces', 'POST', {
       name: workspaceName,
-      slug: workspaceName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+      slug: workspaceName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now().toString(36),
     }, state.session.access_token);
 
     // Créer coach
